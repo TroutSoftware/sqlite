@@ -8,3 +8,7 @@ type User struct {
 	Name string
 	Age  int
 }
+
+func Example() {
+	// empty function, the User structure matters.
+}

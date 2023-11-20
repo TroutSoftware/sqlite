@@ -194,13 +194,13 @@ const (
 //
 // # Concurrency
 //
-// [Filtrer.Filter] is called against the global variable used in registering the virtual table.
+// Filter is called against the global variable used in registering the virtual table.
 // The global variable can be used to set constant values, including channels if needed.
 //
 // Mutation in the global variable should be avoided in the general case;
 // the implementation does not try to limit or otherwise protect concurrent access.
 //
-// Avoid blocking in the [Filtrer.Filter] method, as this would impact all virtual tables.
+// Avoid blocking in the Filter method, as this would impact all virtual tables.
 // Instead, if a form of rate limit is required, prefer returning a well-known error.
 //
 // [affinity]: https://www.sqlite.org/datatype3.html
@@ -210,7 +210,7 @@ type Filtrer[T any] interface {
 
 // Iter represents an iterator over multiple results of an API.
 // Implementations must be safe for concurrent use.
-// The iterator is going to be primed by calling [Iter.Next] before any value is requested.
+// The iterator is going to be primed by calling Next before any value is requested.
 type Iter[T any] interface {
 	Next() bool
 	Err() error
@@ -238,10 +238,19 @@ type iterArray[T any] struct {
 	seen  int
 }
 
+// FromArray returns an iterator over values
 func FromArray[T any](values []T) Iter[T] { return &iterArray[T]{table: values} }
+
+// FromError returns an iterator with err
 func FromError[T any](err error) Iter[T]  { return &iterError[T]{err: err} }
+
+// FromOne returns an iterator with a single value v
 func FromOne[T any](v T) Iter[T]          { return &iterone[T]{v: v} }
+
+// None returns the empty iterator
 func None[T any]() Iter[T]                { return &iterNone[T]{} }
+
+// TransformArray iterates over applying trans to values
 func TransformArray[T, U any](values []T, trans func(T) U) Iter[U] {
 	return &iterTrans[T, U]{base: FromArray(values), trans: trans}
 }
