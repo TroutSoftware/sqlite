@@ -563,6 +563,8 @@ func goUpdate(vtab C.uintptr_t, db *C.sqlite3, argc C.int, argv **C.sqlite3_valu
 			continue
 		}
 
+		vv := v.Field(i-2)
+
 		switch C.sqlite3_value_type(args[i]) {
 		case C.SQLITE_NULL:
 			continue
@@ -577,7 +579,11 @@ func goUpdate(vtab C.uintptr_t, db *C.sqlite3, argc C.int, argv **C.sqlite3_valu
 			}
 		case C.SQLITE_BLOB:
 			l := C.sqlite3_value_bytes(args[i])
-			v.Field(i - 2).SetBytes(([]byte)(unsafe.Slice((*byte)(C.sqlite3_value_blob(args[i])), l)))
+			if vv.Kind() == reflect.String {
+				vv.SetString(C.GoString((*C.char)(unsafe.Pointer(C.sqlite3_value_text(args[i])))))
+			} else {
+				vv.SetBytes(([]byte)(unsafe.Slice((*byte)(C.sqlite3_value_blob(args[i])), l)))
+			}
 		}
 	}
 	if err := vm.update(ctx, index, v.Interface()); err != nil {
