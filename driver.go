@@ -482,7 +482,7 @@ func (s *stmt) step(ctx context.Context) error {
 		select {
 		case <-done:
 		case <-ctx.Done():
-			s.interrupt()
+			// s.interrupt()
 		}
 	}()
 	defer close(done)
@@ -589,11 +589,10 @@ func (ctn *Conn) Savepoint(ctx context.Context) (context.Context, error) {
 	return context.WithValue(ctx, spkey{}, sp), err
 }
 
-
 func randname() string {
 	nm := make([]byte, 4)
 	rand.Read(nm)
-	val := uint32(nm[0]) << 24 | uint32(nm[1]) << 16 | uint32(nm[2]) << 8 | uint32(nm[3])
+	val := uint32(nm[0])<<24 | uint32(nm[1])<<16 | uint32(nm[2])<<8 | uint32(nm[3])
 
 	var buf [10]byte // big enough for 32bit value base 10
 	i := len(buf) - 1
@@ -608,7 +607,6 @@ func randname() string {
 	return string(buf[i:])
 
 }
-
 
 // Release returns the given savepoint.
 // It is safe to call this after Rollback

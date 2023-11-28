@@ -8,7 +8,6 @@ import (
 	"runtime/pprof"
 	"runtime/trace"
 	"sync"
-
 )
 
 const MemoryPath = "file::memory:?mode=memory"
@@ -48,7 +47,7 @@ func init() {
 
 // OpenPool ceates a new connection pool
 // TODO(rdo) check if WAL by default is right
-func OpenPool(name string, exts ...func(SQLITE3)) (*Connections, error) {	
+func OpenPool(name string, exts ...func(SQLITE3)) (*Connections, error) {
 	if name == ":memory:" {
 		return nil, errors.New(`":memory:" does not work with pools, use MemoryPath`)
 	}
@@ -135,7 +134,7 @@ func (p *Connections) Release(ctx context.Context) error {
 	}
 
 	err := ctn.Exec(ctx, "RELEASE "+sp.name).Err()
-	if sp.top {
+	if sp.top && err == nil {
 		p.put(ctn)
 	}
 	sp.released = true

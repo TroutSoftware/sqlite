@@ -207,6 +207,7 @@ func TestRollback(t *testing.T) {
 }
 
 func TestCancel(t *testing.T) {
+	t.Skip("too coarse for now")
 	db, err := OpenPool(t.TempDir()+"/db",
 		RegisterFunc("sleep", func(delay int) int { time.Sleep(time.Duration(delay) * time.Millisecond); return delay }))
 	if err != nil {

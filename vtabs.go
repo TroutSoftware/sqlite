@@ -563,7 +563,7 @@ func goUpdate(vtab C.uintptr_t, db *C.sqlite3, argc C.int, argv **C.sqlite3_valu
 			continue
 		}
 
-		vv := v.Field(i-2)
+		vv := v.Field(i - 2)
 
 		switch C.sqlite3_value_type(args[i]) {
 		case C.SQLITE_NULL:

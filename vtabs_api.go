@@ -242,13 +242,13 @@ type iterArray[T any] struct {
 func FromArray[T any](values []T) Iter[T] { return &iterArray[T]{table: values} }
 
 // FromError returns an iterator with err
-func FromError[T any](err error) Iter[T]  { return &iterError[T]{err: err} }
+func FromError[T any](err error) Iter[T] { return &iterError[T]{err: err} }
 
 // FromOne returns an iterator with a single value v
-func FromOne[T any](v T) Iter[T]          { return &iterone[T]{v: v} }
+func FromOne[T any](v T) Iter[T] { return &iterone[T]{v: v} }
 
 // None returns the empty iterator
-func None[T any]() Iter[T]                { return &iterNone[T]{} }
+func None[T any]() Iter[T] { return &iterNone[T]{} }
 
 // TransformArray iterates over applying trans to values
 func TransformArray[T, U any](values []T, trans func(T) U) Iter[U] {
