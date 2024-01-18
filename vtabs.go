@@ -484,17 +484,9 @@ func goBindColumn(vtab C.uintptr_t, cursr C.uintptr_t, ctx *C.sqlite3_context, c
 			C.sqlite3_result_null(ctx)
 		}
 	case json.RawMessage:
-		var p *byte
-		if len(v) > 0 {
-			p = &v[0]
-		}
-		C.sqlite3_result_blob(ctx, unsafe.Pointer(p), C.int(len(v)), C.SQLITE_TRANSIENT)
+		C.sqlite3_result_text(ctx, C.go_strcpy(string(v)), -1, (*[0]byte)(C.sqlite3_free))
 	case []byte:
-		var p *byte
-		if len(v) > 0 {
-			p = &v[0]
-		}
-		C.sqlite3_result_blob(ctx, unsafe.Pointer(p), C.int(len(v)), C.SQLITE_TRANSIENT)
+		C.sqlite3_result_blob(ctx, unsafe.Pointer(unsafe.SliceData(v)), C.int(len(v)), C.SQLITE_TRANSIENT)
 	}
 	if tt := v.Type(); tt.Kind() == reflect.Pointer && tt.Elem().Kind() == reflect.Struct {
 		C.sqlite_ResultGoPointer(ctx, C.uintptr_t(allocHandle(v.Interface())), namefor(tt.Elem()))

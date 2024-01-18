@@ -12,40 +12,6 @@ import (
 )
 
 func TestMetadata(t *testing.T) {
-
-	t.Run("byte value", func(t *testing.T) {
-		t.Skip("https://www.notion.so/trout-software/Starlark-Connectors-07b0a638896741b8b8e2196c81b23055")
-		type S1 struct {
-			Data []byte `vtab:"data"`
-		}
-		strdata := `{coins: {"penny": 1, "nickel": 5, "dime": 10, "quarter": 25}, i: 109, string: "hola"}`
-		b, err := json.Marshal(strdata)
-		if err != nil {
-			t.Fatal(err)
-		}
-		s1 := S1{Data: b}
-
-		db, err := Open(t.TempDir()+"/db", RegisterConstant("connector", s1))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		var got S1
-		err = db.Exec(context.Background(), "select data from connector").ScanOne(&got.Data)
-		if err != nil {
-			t.Fatal("error", err)
-		}
-		t.Log(string(got.Data))
-		var output string
-		if err := json.Unmarshal(got.Data, &output); err != nil {
-			t.Fatal("error", err)
-		}
-
-		if strdata != output {
-			t.Errorf("invalid read back: want %v, got %v", strdata, output)
-		}
-	})
-
 	t.Run("simple values", func(t *testing.T) {
 		type S1 struct {
 			Name string `vtab:"name"`
