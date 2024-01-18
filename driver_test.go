@@ -262,6 +262,80 @@ func TestGenericAccess(t *testing.T) {
 	}
 }
 
+// SQLite type system is dynamic, and the library exposes this fact by using the destination type.
+// The tests cases are all slightly different to make sure type inference work as expected.
+//
+// https://www.sqlite.org/datatype3.html
+func TestSerializeAny(t *testing.T) {
+	t.Run("bintobin", func(t *testing.T) {
+		cases := []struct {
+			in  []byte
+			out []byte
+		}{
+			{[]byte{110, 98, 97, 114, 47, 112, 108, 97, 121, 98, 111, 111}, []byte{110, 98, 97, 114, 47, 112, 108, 97, 121, 98, 111, 111}},
+		}
+
+		for _, c := range cases {
+			cmpValues(t, c.in, c.out)
+		}
+	})
+
+	t.Run("bintostring", func(t *testing.T) {
+		cases := []struct {
+			in  []byte
+			out string
+		}{
+			{[]byte{110, 98, 97, 114, 47, 112, 108, 97, 121, 98, 111, 111}, "nbar/playboo"},
+		}
+
+		for _, c := range cases {
+			cmpValues(t, c.in, c.out)
+		}
+	})
+
+	t.Run("inttobool", func(t *testing.T) {
+		cases := []struct {
+			in  int
+			out bool
+		}{
+			{-1, false},
+			{0, false},
+			{1, true},
+			{2, true},
+		}
+
+		for _, c := range cases {
+			cmpValues(t, c.in, c.out)
+		}
+	})
+}
+
+func cmpValues[T, U any](t *testing.T, in T, out U) {
+	ctn, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+
+	if err := ctn.Exec(ctx, "create table tbl1 (a)").Err(); err != nil {
+		t.Fatal("creating table", err)
+	}
+
+	if err := ctn.Exec(ctx, "insert into tbl1 (a) values (?)", in).Err(); err != nil {
+		t.Fatal("inserting value", err)
+	}
+
+	var got U
+	if err := ctn.Exec(ctx, "select a from tbl1").ScanOne(&got); err != nil {
+		t.Fatal("reading value", err)
+	}
+
+	if !cmp.Equal(got, out) {
+		t.Error(cmp.Diff(got, out))
+	}
+}
+
 func BenchmarkLoopTables(bench *testing.B) {
 	db, err := OpenPool(bench.TempDir() + "/db")
 	if err != nil {

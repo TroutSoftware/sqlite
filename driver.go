@@ -25,7 +25,6 @@ import (
 	"io"
 	"math/bits"
 	"reflect"
-	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
 	"strconv"
@@ -425,21 +424,11 @@ func (s *stmt) start(args []any) error {
 			rv = C.sqlite_BindGoPointer(s.s, C.int(i+1), C.uintptr_t(allocHandle(v.v)), namefor(reflect.TypeOf(v.v).Elem()))
 
 		case []byte:
-			var p *byte
-			if len(v) > 0 {
-				p = &v[0]
-			}
-			rv = C.sqlite3_bind_blob(s.s, C.int(i+1), unsafe.Pointer(p), C.int(len(v)), C.SQLITE_TRANSIENT)
-			runtime.KeepAlive(p)
+			rv = C.sqlite3_bind_blob(s.s, C.int(i+1), unsafe.Pointer(unsafe.SliceData(v)), C.int(len(v)), C.SQLITE_TRANSIENT)
 
 		case *bytes.Buffer:
 			vv := v.Bytes()
-			var p *byte
-			if len(vv) > 0 {
-				p = &vv[0]
-			}
-			rv = C.sqlite3_bind_blob(s.s, C.int(i+1), unsafe.Pointer(p), C.int(len(vv)), C.SQLITE_TRANSIENT)
-			runtime.KeepAlive(p)
+			rv = C.sqlite3_bind_blob(s.s, C.int(i+1), unsafe.Pointer(unsafe.SliceData(vv)), C.int(len(vv)), C.SQLITE_TRANSIENT)
 
 		default:
 			panic(fmt.Sprintf("%T not a base type, must implement BinaryMarshaller", v))
@@ -549,7 +538,12 @@ func (stmt *stmt) scan(dst []any) error {
 				}
 				*v = int(vv)
 			case *[]byte:
-				*v = b
+				if cap(*v) < len(b) {
+					*v = make([]byte, len(b))
+				} else {
+					*v = (*v)[:len(b)]
+				}
+				copy(*v, b)
 			case *bytes.Buffer:
 				v.Write(b)
 			case *string:
