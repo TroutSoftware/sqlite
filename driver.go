@@ -138,7 +138,8 @@ type Conn struct {
 	// release on the happy path
 	// pass with lock held to the error method, which will release it
 
-	next *Conn // for free list
+	zombie *time.Timer
+	next   *Conn // for free list
 }
 
 func (c *Conn) error(rv C.int) error {

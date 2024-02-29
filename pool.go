@@ -4,11 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
 	"sync"
+	"time"
 )
+
+// #include <amalgamation/sqlite3.h>
+// #include <stdint.h>
+//
+// extern char * go_strcpy(_GoString_ st);
+// extern void go_free(void*);
+// extern int sqlite_BindGoPointer(sqlite3_stmt* stmt, int pos, uintptr_t ptr, const char* name);
+import "C"
 
 const MemoryPath = "file::memory:?mode=memory"
 
@@ -85,6 +95,9 @@ func (p *Connections) Savepoint(ctx context.Context) (context.Context, error) {
 	if !ok {
 		ctn = p.take()
 		top = true
+		ctn.zombie = time.AfterFunc(30*time.Second, func() {
+			slog.Warn("zombie connection detected")
+		})
 	}
 
 	spn := randname()
@@ -135,6 +148,7 @@ func (p *Connections) Release(ctx context.Context) error {
 
 	err := ctn.Exec(ctx, "RELEASE "+sp.name).Err()
 	if sp.top && err == nil {
+		ctn.zombie.Stop()
 		p.put(ctn)
 	}
 	sp.released = true
@@ -147,6 +161,7 @@ func (p *Connections) put(ctn *Conn) {
 	p.mx.Lock()
 	ctn.next = p.free
 	p.free = ctn
+
 	p.wait.Signal()
 	p.mx.Unlock()
 }
@@ -162,6 +177,7 @@ func (p *Connections) Rollback(ctx context.Context) error {
 
 	err := ctn.Exec(ctx, "ROLLBACK TO "+sp.name).Err()
 	if sp.top {
+		ctn.zombie.Stop()
 		p.put(ctn)
 	}
 	sp.task.End()

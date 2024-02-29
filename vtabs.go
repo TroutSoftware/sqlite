@@ -527,11 +527,11 @@ func goUpdate(vtab C.uintptr_t, db *C.sqlite3, argc C.int, argv **C.sqlite3_valu
 		return C.SQLITE_READONLY
 	}
 	// sqlite uses mutex to protect the sqlite3_step making the call to this function
-	// accessing the same DB will case a deadlock, except if we use the same thread – SQLite uses PTHREAD_MUTEX_RECURSIVE
+	// accessing the same DB will cause a deadlock, except if we use the same thread – SQLite uses PTHREAD_MUTEX_RECURSIVE
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	args := (*[1 << 10]*C.sqlite3_value)(unsafe.Pointer(argv))
+	args := unsafe.Slice(argv, argc)
 	ctx := context.WithValue(context.Background(), ckey{}, &Conn{db: db})
 
 	if argc == 1 {
@@ -561,7 +561,12 @@ func goUpdate(vtab C.uintptr_t, db *C.sqlite3, argc C.int, argv **C.sqlite3_valu
 		case C.SQLITE_NULL:
 			continue
 		case C.SQLITE_TEXT:
-			v.Field(i - 2).SetString(C.GoString((*C.char)(unsafe.Pointer(C.sqlite3_value_text(args[i])))))
+			if vv.Kind() == reflect.String {
+				vv.SetString(C.GoString((*C.char)(unsafe.Pointer(C.sqlite3_value_text(args[i])))))
+			} else {
+				l := C.sqlite3_value_bytes(args[i])
+				vv.SetBytes(([]byte)(unsafe.Slice((*byte)(C.sqlite3_value_blob(args[i])), l)))
+			}
 		case C.SQLITE_INTEGER:
 			switch v.Field(i - 2).Kind() {
 			case reflect.Int:
@@ -570,10 +575,10 @@ func goUpdate(vtab C.uintptr_t, db *C.sqlite3, argc C.int, argv **C.sqlite3_valu
 				v.Field(i - 2).SetBool(int64(C.sqlite3_value_int64(args[i])) == 1)
 			}
 		case C.SQLITE_BLOB:
-			l := C.sqlite3_value_bytes(args[i])
 			if vv.Kind() == reflect.String {
 				vv.SetString(C.GoString((*C.char)(unsafe.Pointer(C.sqlite3_value_text(args[i])))))
 			} else {
+				l := C.sqlite3_value_bytes(args[i])
 				vv.SetBytes(([]byte)(unsafe.Slice((*byte)(C.sqlite3_value_blob(args[i])), l)))
 			}
 		}
