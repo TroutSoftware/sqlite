@@ -31,6 +31,17 @@ type Connections struct {
 	wait sync.Cond
 }
 
+// FreeCount returns the number of free connections in the pool
+func (c *Connections) FreeCount() int {
+	c.mx.Lock()
+	defer c.mx.Unlock()
+	i := 0
+	for p := c.free; p != nil; p = p.next {
+		i++
+	}
+	return i
+}
+
 type ckey struct{}
 type spkey struct{}
 
@@ -140,6 +151,10 @@ func (p *Connections) take() *Conn {
 }
 
 func (p *Connections) Release(ctx context.Context) error {
+	if r := recover(); r != nil {
+		panic(r)
+	}
+
 	ctn := ctx.Value(ckey{}).(*Conn)
 	sp := ctx.Value(spkey{}).(*savepoint)
 	if sp.released {
