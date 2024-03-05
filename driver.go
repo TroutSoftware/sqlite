@@ -377,20 +377,11 @@ type stmt struct {
 func (s *stmt) start(args []any) error {
 	n := int(C.sqlite3_bind_parameter_count(s.s))
 	if n != len(args) {
-		panic(fmt.Sprintf("incorrect argument count for command: have %d want %d", len(args), n))
+		return fmt.Errorf("incorrect argument count for command: have %d want %d", len(args), n)
 	}
 
 	s.c.mxdb.Lock()
 	for i, v := range args {
-		if bm, ok := v.(encoding.BinaryMarshaler); ok {
-			dt, err := bm.MarshalBinary()
-			if err != nil {
-				return err
-			}
-
-			v = dt
-		}
-
 		var rv C.int
 		switch v := v.(type) {
 		case nil:
@@ -432,7 +423,16 @@ func (s *stmt) start(args []any) error {
 			rv = C.sqlite3_bind_blob(s.s, C.int(i+1), unsafe.Pointer(unsafe.SliceData(vv)), C.int(len(vv)), C.SQLITE_TRANSIENT)
 
 		default:
-			panic(fmt.Sprintf("%T not a base type, must implement BinaryMarshaller", v))
+			bm, ok := v.(encoding.BinaryMarshaler)
+			if !ok {
+				return fmt.Errorf("%T not a base type, must implement BinaryMarshaller", v)
+			}
+			dt, err := bm.MarshalBinary()
+			if err != nil {
+				return err
+			}
+
+			rv = C.sqlite3_bind_blob(s.s, C.int(i+1), unsafe.Pointer(unsafe.SliceData(dt)), C.int(len(dt)), C.SQLITE_TRANSIENT)
 		}
 
 		if rv != C.SQLITE_OK {
@@ -527,9 +527,6 @@ func (stmt *stmt) scan(dst []any) error {
 			if n > 0 {
 				b = unsafe.Slice((*byte)(C.sqlite3_column_blob(stmt.s, C.int(i))), n)
 			}
-			if unm, ok := dst[i].(encoding.BinaryUnmarshaler); ok {
-				return unm.UnmarshalBinary(b)
-			}
 
 			switch v := dst[i].(type) {
 			case *int:
@@ -560,6 +557,9 @@ func (stmt *stmt) scan(dst []any) error {
 			case *PointerValue:
 				panic("Pointer values cannot be scanned")
 			default:
+				if unm, ok := dst[i].(encoding.BinaryUnmarshaler); ok {
+					return unm.UnmarshalBinary(b)
+				}
 				panic(fmt.Sprintf("%T invalid decoder type", v))
 			}
 
