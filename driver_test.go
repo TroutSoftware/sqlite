@@ -400,3 +400,47 @@ func (db *Connections) mustExec(ctx context.Context, r interface{ Fatal(...any) 
 		r.Fatal(err)
 	}
 }
+
+func TestMultiValueScansAreIgnored(t *testing.T) {
+	conn, err := Open(t.TempDir() + "/database.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Exec(context.Background(), "create table if not exists test (a text, b text)").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Exec(context.Background(), "insert into test (a, b) VALUES(?,?)", plainstring("dog:a"), plainstring("cat:b")).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Exec(context.Background(), "insert into test (a, b) VALUES(?,?)", plainstring("fff:a"), plainstring("mmm:b")).Err(); err != nil {
+		t.Fatal(err)
+	}
+	var as, bs []plainstring
+	rows := conn.Exec(context.Background(), "select a, b from test order by a")
+	for rows.Next() {
+		var a, b plainstring
+		rows.Scan(&a, &b)
+		as = append(as, a)
+		bs = append(bs, b)
+	}
+	if !cmp.Equal(as, plsg("dog:a", "fff:a")) {
+		t.Error("as differ", cmp.Diff(as, plsg("dog:a", "fff:a")))
+	}
+
+	if !cmp.Equal(bs, plsg("cat:b", "mmm:b")) {
+		t.Error("bs differ", cmp.Diff(bs, plsg("cat:b", "mmm:b")))
+	}
+
+}
+
+type plainstring string
+
+func plsg(ss ...plainstring) []plainstring { return ss }
+
+func (r plainstring) MarshalBinary() ([]byte, error) {
+	return []byte(string(r)), nil
+}
+func (r *plainstring) UnmarshalBinary(dt []byte) error {
+	*r = plainstring(string(dt))
+	return nil
+}

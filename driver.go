@@ -557,10 +557,13 @@ func (stmt *stmt) scan(dst []any) error {
 			case *PointerValue:
 				panic("Pointer values cannot be scanned")
 			default:
-				if unm, ok := dst[i].(encoding.BinaryUnmarshaler); ok {
-					return unm.UnmarshalBinary(b)
+				unm, ok := dst[i].(encoding.BinaryUnmarshaler)
+				if !ok {
+					panic(fmt.Sprintf("%T invalid decoder type", v))
 				}
-				panic(fmt.Sprintf("%T invalid decoder type", v))
+				if err := unm.UnmarshalBinary(b); err != nil {
+					return err
+				}
 			}
 
 		case C.SQLITE_NULL:
