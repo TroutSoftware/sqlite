@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/TroutSoftware/sqlite"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -424,7 +423,7 @@ func (r *row2) UnmarshalBinary(dt []byte) error {
 
 func TestScanRowsBug(t *testing.T) {
 	t.Skip("THAT HELPS REPRODUCING THE BUG")
-	conn, err := sqlite.Open(t.TempDir() + "/database.db")
+	conn, err := Open(t.TempDir() + "/database.db")
 	if err != nil {
 		t.Fatal(err)
 	}
