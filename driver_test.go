@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/TroutSoftware/sqlite"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -398,5 +399,62 @@ func BenchmarkLoopTables(bench *testing.B) {
 func (db *Connections) mustExec(ctx context.Context, r interface{ Fatal(...any) }, cmd string, args ...any) {
 	if err := db.Exec(ctx, cmd, args...).Err(); err != nil {
 		r.Fatal(err)
+	}
+}
+
+type row1 string
+
+func (r row1) MarshalBinary() ([]byte, error) {
+	return []byte(string(r)), nil
+}
+func (r *row1) UnmarshalBinary(dt []byte) error {
+	*r = row1(string(dt))
+	return nil
+}
+
+type row2 string
+
+func (r row2) MarshalBinary() ([]byte, error) {
+	return []byte(string(r)), nil
+}
+func (r *row2) UnmarshalBinary(dt []byte) error {
+	*r = row2(string(dt))
+	return nil
+}
+
+func TestScanRowsBug(t *testing.T) {
+	t.Skip("THAT HELPS REPRODUCING THE BUG")
+	conn, err := sqlite.Open(t.TempDir() + "/database.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Exec(context.Background(), "create table if not exists test (row1 text, row2 text)").Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Exec(context.Background(), "insert into test (row1, row2) VALUES(?,?)", row1("dog:row1"), row2("cat:row2")).Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Exec(context.Background(), "insert into test (row1, row2) VALUES(?,?)", row1("fff:row1"), row2("mmm:row2")).Err(); err != nil {
+		t.Fatal(err)
+	}
+	var rows1 []row1
+	var rows2 []row2
+	rows := conn.Exec(context.Background(), "select row1, row2 from test")
+	for rows.Next() {
+		var r1 row1
+		var r2 row2
+		rows.Scan(&r1, &r2)
+		if len(r1) > 0 {
+			rows1 = append(rows1, r1)
+		}
+		if len(r2) > 0 {
+			rows2 = append(rows2, r2)
+		}
+	}
+	if len(rows1) != 2 {
+		t.Errorf("want [dog:row1,fff:row1] got %s", rows1)
+	}
+	if len(rows2) != 2 {
+		t.Errorf("want [cat:row2,mmm:row2] got %s", rows2)
 	}
 }
