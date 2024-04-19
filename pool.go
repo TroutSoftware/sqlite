@@ -37,6 +37,12 @@ func (c *Connections) FreeCount() int {
 	defer c.mx.Unlock()
 	i := 0
 	for p := c.free; p != nil; p = p.next {
+		var st *C.sqlite3_stmt
+		st = C.sqlite3_next_stmt(p.db, st)
+		if st != nil {
+			q := C.sqlite3_sql(st)
+			fmt.Println("dangling statements! ", C.GoString(q))
+		}
 		i++
 	}
 	return i
