@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"reflect"
 	"runtime/pprof"
 	"strconv"
 	"sync"
@@ -68,13 +69,8 @@ func TestShortHands(t *testing.T) {
 
 	ctx := context.Background()
 
-	if err := ctn.Exec(ctx, "create table tbl1 (a primary key, b)").Err(); err != nil {
-		t.Fatal("cannot create table", err)
-	}
-
-	if err := ctn.Exec(ctx, "insert into tbl1 (a, b) values (?, ?)", 1, "a value").Err(); err != nil {
-		t.Fatal("inserting values", err)
-	}
+	ctn.Exec(ctx, "create table tbl1 (a primary key, b)").GuardErr()
+	ctn.Exec(ctx, "insert into tbl1 (a, b) values (?, ?)", 1, "a value").GuardErr()
 
 	var a int
 	if err := ctn.Exec(ctx, "select a from tbl1 where b = ?", "a value").ScanOne(&a); err != nil {
@@ -184,60 +180,15 @@ func TestRollback(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := pool.Exec(ctx, "insert into t (a) values (?)", "hello world").Err(); err != nil {
-			t.Fatal(err)
-		}
+		pool.Exec(ctx, "insert into t (a) values (?)", "hello world").GuardErr()
 		pool.Release(ctx)
 		pool.Rollback(ctx) // ignored since release happened before
-		var v string
-		if err := pool.Exec(ctx, "select a from t").ScanOne(&v); err != nil {
-			t.Fatal(err)
-		}
-		if v != "hello world" {
-			t.Fatal("failed to verify the existence of written data", v)
-		}
+		assertEquals(t, ctx, pool, "select a from t", "hello world")
 	}
 
 	// top-level nesting can invalidate everything, the table should be empty
 	pool.Rollback(ctx)
-	var w int
-	if err := pool.Exec(ctx, "select count(a) from t").ScanOne(&w); err != nil {
-		t.Fatal(err)
-	}
-	if w != 0 {
-		t.Fatal("read back value from top-level savepoint", w)
-	}
-}
-
-// The following function tries to run the sqlite statement 'VACUUM;'
-// through a brand new connection that it acquires from the connection
-// 'pool' (the first argument) in a new goroutine. The second argument
-// named as 'shouldFail' tells the function whether it should expect
-// a 'the database file is busy' error. It returns an error if the
-// real result of the attempt and the expected result do not match.
-func runVacuumViaNewConnectionInNewGoroutine(pool *Connections,
-	shouldFail bool) error {
-	errChan := make(chan error)
-	defer close(errChan)
-
-	go func() {
-		err := pool.Exec(context.Background(), "VACUUM;").Err()
-		if shouldFail {
-			if err == nil {
-				errChan <- fmt.Errorf("err should NOT have been nil")
-				return
-			} else if err.Error() != "the database file is busy" {
-				errChan <- fmt.Errorf("unexpected error: %s", err.Error())
-				return
-			}
-			errChan <- nil
-			return
-		}
-		errChan <- err
-	}()
-
-	err := <-errChan
-	return err
+	assertEquals(t, ctx, pool, "select count(a) from t", 0)
 }
 
 func TestRollbackTo(t *testing.T) {
@@ -256,17 +207,8 @@ func TestRollbackTo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := pool.Exec(txCtx, "insert into t (a) values (?)", "hello world").Err(); err != nil {
-		t.Fatal(err)
-	}
-
-	var v string
-	if err := pool.Exec(txCtx, "select a from t").ScanOne(&v); err != nil {
-		t.Fatal(err)
-	}
-	if v != "hello world" {
-		t.Fatal("failed to verify existence of written data", v)
-	}
+	pool.Exec(txCtx, "insert into t (a) values (?)", "hello world").GuardErr()
+	assertEquals(t, txCtx, pool, "select a from t", "hello world")
 
 	// RollbackTo, the changes are discarded, and the transaction is NOT
 	// cancelled. Therefore the following VACUUM attempt made from a different
@@ -277,15 +219,9 @@ func TestRollbackTo(t *testing.T) {
 	}
 
 	// The table should be empty
-	var w int
-	if err := pool.Exec(txCtx, "select count(a) from t").ScanOne(&w); err != nil {
-		t.Fatal(err)
-	}
-	if w != 0 {
-		t.Error("read back value from top-level savepoint", w)
-	}
+	assertEquals(t, txCtx, pool, "select count(a) from t", 0)
 
-	err = runVacuumViaNewConnectionInNewGoroutine(pool, true)
+	err = goRunVacuum(pool, BusyTransaction)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +233,7 @@ func TestRollbackTo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = runVacuumViaNewConnectionInNewGoroutine(pool, false)
+	err = goRunVacuum(pool, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,26 +246,15 @@ func TestRollbackWithoutRelease(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := pool.Exec(ctx, "create table t (a)").Err(); err != nil {
-		t.Fatal(err)
-	}
+	pool.Exec(ctx, "create table t (a)").GuardErr()
 
 	txCtx, err := pool.Savepoint(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if err := pool.Exec(txCtx, "insert into t (a) values (?)", "hello world").Err(); err != nil {
-		t.Fatal(err)
-	}
-
-	var v string
-	if err := pool.Exec(txCtx, "select a from t").ScanOne(&v); err != nil {
-		t.Fatal(err)
-	}
-	if v != "hello world" {
-		t.Fatal("failed to verify existence of written data", v)
-	}
+	pool.Exec(txCtx, "insert into t (a) values (?)", "hello world").GuardErr()
+	assertEquals(t, txCtx, pool, "select a from t", "hello world")
 
 	// Rollback, the changes are not committed, and the transaction is
 	// cancelled. Therefore the following VACUUM attempt made from a different
@@ -339,19 +264,47 @@ func TestRollbackWithoutRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = runVacuumViaNewConnectionInNewGoroutine(pool, false)
+	err = goRunVacuum(pool, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertEquals(t, ctx, pool, "select count(a) from t", 0)
+}
 
-	// The table should be empty
-	var w int
-	if err := pool.Exec(txCtx, "select count(a) from t").ScanOne(&w); err != nil {
-		t.Fatal(err)
+// TODO: this should probably go into a script (cf rsc.io/script).
+func assertEquals(t *testing.T, ctx context.Context, x interface {
+	Exec(ctx context.Context, query string, args ...any) *Rows
+}, query string, want ...any) {
+	t.Helper()
+	got := make([]any, len(want))
+	for i := range got {
+		got[i] = reflect.New(reflect.TypeOf(want[i])).Interface()
 	}
-	if w != 0 {
-		t.Error("read back value from top-level savepoint", w)
+	err := x.Exec(ctx, query).ScanOne(got...)
+	if err != nil {
+		t.Fatalf("invalid query %s: %s", query, err)
 	}
+	gotv := make([]any, len(got))
+	for i := range gotv {
+		gotv[i] = reflect.ValueOf(got[i]).Elem().Interface()
+	}
+	if !cmp.Equal(gotv, want) {
+		t.Fatal(cmp.Diff(gotv, want))
+	}
+}
+
+func goRunVacuum(pool *Connections, expect error) error {
+	errc := make(chan error)
+
+	go func() {
+		err := pool.Exec(context.Background(), "VACUUM;").Err()
+		if !errors.Is(err, expect) {
+			errc <- fmt.Errorf("unexpected error: %w", err)
+		}
+		close(errc)
+	}()
+
+	return <-errc
 }
 
 func TestRollbackNestedSavepointsWithoutRelease(t *testing.T) {
@@ -370,17 +323,8 @@ func TestRollbackNestedSavepointsWithoutRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := pool.Exec(txCtx1, "insert into t (a) values (?)", "hello world").Err(); err != nil {
-		t.Fatal(err)
-	}
-
-	var v string
-	if err := pool.Exec(txCtx1, "select a from t").ScanOne(&v); err != nil {
-		t.Fatal(err)
-	}
-	if v != "hello world" {
-		t.Fatal("failed to verify existence of written data", v)
-	}
+	pool.Exec(txCtx1, "insert into t (a) values (?)", "hello world").GuardErr()
+	assertEquals(t, txCtx1, pool, "select a from t", "hello world")
 
 	{
 		// The new savepoint is stored in a different context.
@@ -389,18 +333,8 @@ func TestRollbackNestedSavepointsWithoutRelease(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err = pool.Exec(txCtx2, "insert into t (a) values (?)", "hi there").Err(); err != nil {
-			t.Fatal(err)
-		}
-
-		// The table should contain two entries here
-		var w int
-		if err := pool.Exec(txCtx2, "select count(a) from t").ScanOne(&w); err != nil {
-			t.Fatal(err)
-		}
-		if w != 2 {
-			t.Error("read back value from top-level savepoint", w)
-		}
+		pool.Exec(txCtx2, "insert into t (a) values (?)", "hi there").GuardErr()
+		assertEquals(t, txCtx2, pool, "select count(a) from t", 2)
 
 		// The inner Rollback, the changes are not committed, and the transaction
 		// (the implicit one that was created when the first savepoint was
@@ -411,14 +345,9 @@ func TestRollbackNestedSavepointsWithoutRelease(t *testing.T) {
 		}
 
 		// The table should now contain only one entry, because of the rollback
-		if err := pool.Exec(txCtx2, "select count(a) from t").ScanOne(&w); err != nil {
-			t.Fatal(err)
-		}
-		if w != 1 {
-			t.Error("read back value from top-level savepoint", w)
-		}
+		assertEquals(t, txCtx2, pool, "select count(a) from t", 1)
 
-		err = runVacuumViaNewConnectionInNewGoroutine(pool, true)
+		err = goRunVacuum(pool, BusyTransaction)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -431,19 +360,12 @@ func TestRollbackNestedSavepointsWithoutRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = runVacuumViaNewConnectionInNewGoroutine(pool, false)
+	err = goRunVacuum(pool, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// And the table should be empty
-	var w int
-	if err := pool.Exec(txCtx1, "select count(a) from t").ScanOne(&w); err != nil {
-		t.Fatal(err)
-	}
-	if w != 0 {
-		t.Error("read back value from top-level savepoint", w)
-	}
+	assertEquals(t, txCtx1, pool, "select count(a) from t", 0)
 }
 
 func TestCancel(t *testing.T) {
@@ -683,4 +605,11 @@ func (r plainstring) MarshalBinary() ([]byte, error) {
 func (r *plainstring) UnmarshalBinary(dt []byte) error {
 	*r = plainstring(string(dt))
 	return nil
+}
+
+// test helpers when OK to panic
+func (r *Rows) GuardErr() {
+	if err := r.Err(); err != nil {
+		panic(err)
+	}
 }
