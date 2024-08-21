@@ -614,9 +614,35 @@ func (ctn *Conn) Release(ctx context.Context) error {
 	return ctn.Exec(ctx, "RELEASE "+sp.name).Err()
 }
 
-// Rollback returns the given savepoint.
-// It is safe to call this after Rollback
-func (ctn *Conn) Rollback(ctx context.Context) error {
+// RollbackTo rolls back all changes to the current changepoint, but it does
+// not release the existing savepoint. This can be useful for retries, as it
+// restart any potential implicit transaction that's related to this
+// savepoint.
+func (ctn *Conn) RollbackTo(ctx context.Context) error {
 	sp := ctx.Value(spkey{}).(*savepoint)
 	return ctn.Exec(ctx, "ROLLBACK TO "+sp.name).Err()
+}
+
+// Rollback restores the DB with the original state that the savepoint had
+// captured and it releases the savepoint not to leave any zombie transactions
+// behind. If the savepoint has already been 'Release'd, this function returns
+// immediately without any errors.
+// Rollback SHOULD be called with a defer statement for EVERY successfully
+// created savepoint, right after its creation.
+func (ctn *Conn) Rollback(ctx context.Context) error {
+	sp := ctx.Value(spkey{}).(*savepoint)
+	if sp.released {
+		return nil
+	}
+
+	err := ctn.Exec(ctx, "ROLLBACK TO "+sp.name).Err()
+	if err == nil {
+		err = ctn.Exec(ctx, "RELEASE "+sp.name).Err()
+	}
+
+	if err == nil {
+		sp.released = true
+	}
+
+	return err
 }

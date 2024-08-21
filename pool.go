@@ -168,12 +168,14 @@ func (p *Connections) Release(ctx context.Context) error {
 	}
 
 	err := ctn.Exec(ctx, "RELEASE "+sp.name).Err()
-	if sp.top && err == nil {
-		ctn.zombie.Stop()
-		p.put(ctn)
+	if err == nil {
+		if sp.top {
+			ctn.zombie.Stop()
+			p.put(ctn)
+		}
+		sp.released = true
+		sp.task.End()
 	}
-	sp.released = true
-	sp.task.End()
 	return err
 }
 
@@ -187,8 +189,28 @@ func (p *Connections) put(ctn *Conn) {
 	p.mx.Unlock()
 }
 
-// Rollback rolls back all changes to the current changepoint.
-// The rollback will not happen if the savepoint is already released; it is safe to call this from a defer.
+// RollbackTo rolls back all changes to the current changepoint, but it does
+// not release the existing savepoint. This can be useful for retries, as it
+// restarts any potential implicit transaction that's related to this
+// savepoint.
+func (p *Connections) RollbackTo(ctx context.Context) error {
+	ctn := ctx.Value(ckey{}).(*Conn)
+	sp := ctx.Value(spkey{}).(*savepoint)
+	return ctn.Exec(ctx, "ROLLBACK TO "+sp.name).Err()
+}
+
+// Rollback is a safety net function that SHOULD be called for EVERY
+// savepoint with a defer statement right after the creation of that
+// savepoint. If the savepoint has already been released and its changes
+// were committed (or merged into the speculative changes of its parent
+// savepoint), this function will simply return nil. If this savepoint
+// has not yet been released, then this function will first revert any
+// changes done within the DB and then release the savepoint. This operation
+// may cause the existing transaction to be destroyed, if this savepoint
+// was the first savepoint on that connection and there was not other
+// explicit transaction that was previously created. If another transaction
+// is around (implicit (created by a "BEGIN") or explicit (created by a parent
+// savepoint)) that wraps this savepoint, it will still survive.
 func (p *Connections) Rollback(ctx context.Context) error {
 	ctn := ctx.Value(ckey{}).(*Conn)
 	sp := ctx.Value(spkey{}).(*savepoint)
@@ -197,11 +219,19 @@ func (p *Connections) Rollback(ctx context.Context) error {
 	}
 
 	err := ctn.Exec(ctx, "ROLLBACK TO "+sp.name).Err()
-	if sp.top {
-		ctn.zombie.Stop()
-		p.put(ctn)
+	if err == nil {
+		err = ctn.Exec(ctx, "RELEASE "+sp.name).Err()
 	}
-	sp.task.End()
+
+	if err == nil {
+		sp.released = true
+		if sp.top {
+			ctn.zombie.Stop()
+			p.put(ctn)
+		}
+		sp.task.End()
+	}
+
 	return err
 }
 
