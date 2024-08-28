@@ -226,6 +226,12 @@ type Rows struct {
 	final  func()
 }
 
+// NewErroredRows create a cursor that will fail immediatly.
+// This is useful for API that pipeline connection creation and direct query.
+func NewErroredRows(ctn *Conn, err error) *Rows {
+	return &Rows{stmt: &stmt{c: ctn}, err: err}
+}
+
 // NumColumn returns the count of columns returned by the current statement.
 // Use [Rows.ColumnName] if the name is useful.
 func (rows *Rows) NumColumn() int { return int(C.sqlite3_column_count(rows.stmt.s)) }
