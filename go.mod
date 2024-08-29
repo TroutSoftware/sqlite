@@ -1,6 +1,6 @@
 module github.com/TroutSoftware/sqlite
 
-go 1.21.4
+go 3.24.1
 
 require (
 	github.com/google/go-cmp v0.6.0
