@@ -122,6 +122,35 @@ func Open(name string, exts ...func(SQLITE3)) (*Conn, error) {
 	return &Conn{db: db}, nil
 }
 
+// ReadOnly opens the database at name in read-only mode.
+func ReadOnly(name string, exts ...func(SQLITE3)) (*Conn, error) {
+	if C.sqlite3_threadsafe() == 0 {
+		return nil, errors.New("sqlite library was not compiled for thread-safe operation")
+	}
+
+	var db *C.sqlite3
+	cname := C.go_strcpy(name)
+	defer C.go_free(unsafe.Pointer(cname))
+	rv := C.sqlite3_open_v2(cname, &db,
+		C.SQLITE_OPEN_FULLMUTEX|
+			C.SQLITE_OPEN_READONLY|
+			C.SQLITE_OPEN_WAL|
+			C.SQLITE_OPEN_URI,
+		nil)
+	if rv != C.SQLITE_OK {
+		return nil, errText[rv]
+	}
+
+	C.sqlite3_extended_result_codes(db, 1)
+	C.sqlite3_busy_timeout(db, 10_000)
+
+	for _, f := range append(vtables, exts...) {
+		f(db)
+	}
+
+	return &Conn{db: db}, nil
+}
+
 // Conn is a connection to a given database.
 // Conn is safe for concurrent use.
 //
@@ -226,10 +255,16 @@ type Rows struct {
 	final  func()
 }
 
-// NewErroredRows create a cursor that will fail immediatly.
-// This is useful for API that pipeline connection creation and direct query.
-func NewErroredRows(ctn *Conn, err error) *Rows {
-	return &Rows{stmt: &stmt{c: ctn}, err: err}
+// NewErroredRows create a collection of rows that will error on the first call.
+// This is useful to pipeline call and only handle error at the end, e.g.:
+//
+//	ctn, err := sqlite.Open("/doesnotexist")
+//	if err != nil {
+//	  return NewErroredRows(c, err)
+//	}
+//	return ctn.Exec(ctx, "select * from table")
+func NewErroredRows(c *Conn, err error) *Rows {
+	return &Rows{err: err, stmt: &stmt{c: c}}
 }
 
 // NumColumn returns the count of columns returned by the current statement.
