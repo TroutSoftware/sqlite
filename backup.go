@@ -21,14 +21,19 @@ func BackupDB(pool *Connections, dest string) error {
 	ctn := pool.take()
 	defer pool.put(ctn)
 
+	return Backup(ctn, dest)
+}
+
+// Backup performs an [online backup] to dest
+//
+// [online backup] https://www.sqlite.org/backup.html
+func Backup(ctn *Conn, dest string) error {
 	var db *C.sqlite3
 	cname := C.go_strcpy(dest)
 	defer C.go_free(unsafe.Pointer(cname))
 	rv := C.sqlite3_open_v2(cname, &db,
 		C.SQLITE_OPEN_FULLMUTEX|
 			C.SQLITE_OPEN_READWRITE|
-			C.SQLITE_OPEN_CREATE|
-			C.SQLITE_OPEN_WAL|
 			C.SQLITE_OPEN_URI,
 		nil)
 	if rv != C.SQLITE_OK {
