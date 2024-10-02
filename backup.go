@@ -34,6 +34,7 @@ func Backup(ctn *Conn, dest string) error {
 	rv := C.sqlite3_open_v2(cname, &db,
 		C.SQLITE_OPEN_FULLMUTEX|
 			C.SQLITE_OPEN_READWRITE|
+			C.SQLITE_OPEN_CREATE|
 			C.SQLITE_OPEN_URI,
 		nil)
 	if rv != C.SQLITE_OK {
