@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -105,7 +106,6 @@ func Open(name string, exts ...func(SQLITE3)) (*Conn, error) {
 		C.SQLITE_OPEN_FULLMUTEX|
 			C.SQLITE_OPEN_READWRITE|
 			C.SQLITE_OPEN_CREATE|
-			C.SQLITE_OPEN_WAL|
 			C.SQLITE_OPEN_URI,
 		nil)
 	if rv != C.SQLITE_OK {
@@ -134,7 +134,6 @@ func ReadOnly(name string, exts ...func(SQLITE3)) (*Conn, error) {
 	rv := C.sqlite3_open_v2(cname, &db,
 		C.SQLITE_OPEN_FULLMUTEX|
 			C.SQLITE_OPEN_READONLY|
-			C.SQLITE_OPEN_WAL|
 			C.SQLITE_OPEN_URI,
 		nil)
 	if rv != C.SQLITE_OK {
@@ -585,6 +584,13 @@ func (stmt *stmt) scan(dst []any) error {
 				copy(*v, b)
 			case *bytes.Buffer:
 				v.Write(b)
+			case *json.RawMessage:
+				if cap(*v) < len(b) {
+					*v = make([]byte, len(b))
+				} else {
+					*v = (*v)[:len(b)]
+				}
+				copy(*v, b)
 			case *string:
 				*v = string(b)
 			case *time.Time:
