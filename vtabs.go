@@ -358,9 +358,7 @@ func (b *indexbuilder) Use(ci int) {
 func (b *indexbuilder) SelectIndex(n int) { b.ix = n }
 
 //export goAllocCursor
-func goAllocCursor(cside C.uintptr_t) C.uintptr_t {
-	return C.uintptr_t(allocHandle(reserve{}))
-}
+func goAllocCursor(_ C.uintptr_t) C.uintptr_t { return C.uintptr_t(allocHandle(reserve{})) }
 
 //export goFilter
 func goFilter(vtab C.uintptr_t, cursr C.uintptr_t, inum C.int, cidx *C.char, argc C.int, argv **C.sqlite3_value, cerr **C.char) C.int {

@@ -167,7 +167,8 @@ type Conn struct {
 	// pass with lock held to the error method, which will release it
 
 	zombie *time.Timer
-	next   *Conn // for free list
+	task   *trace.Task // for multi-query operations
+	next   *Conn           // for free list
 }
 
 func (c *Conn) error(rv C.int) error {
@@ -620,20 +621,6 @@ func (stmt *stmt) scan(dst []any) error {
 	return nil
 }
 
-// Savepoint creates a new [savepoint] in transaction (think about begin).
-// It is the responsibility of the caller to [Conn.Release] it.
-//
-// Most of the time, the implementation of [Pool.Savepoint] should be preferred.
-//
-// [savepoint]: https://sqlite.org/lang_savepoint.html
-func (ctn *Conn) Savepoint(ctx context.Context) (context.Context, error) {
-	spn := randname()
-	sp := &savepoint{name: spn}
-
-	err := ctn.Exec(ctx, "SAVEPOINT "+spn).Err()
-	return context.WithValue(ctx, spkey{}, sp), err
-}
-
 func randname() string {
 	nm := make([]byte, 4)
 	rand.Read(nm)
@@ -651,45 +638,4 @@ func randname() string {
 	buf[i] = byte('a' + val)
 	return string(buf[i:])
 
-}
-
-// Release returns the given savepoint.
-// It is safe to call this after Rollback
-func (ctn *Conn) Release(ctx context.Context) error {
-	sp := ctx.Value(spkey{}).(*savepoint)
-	sp.released = true
-	return ctn.Exec(ctx, "RELEASE "+sp.name).Err()
-}
-
-// RollbackTo rolls back all changes to the current changepoint, but it does
-// not release the existing savepoint. This can be useful for retries, as it
-// restart any potential implicit transaction that's related to this
-// savepoint.
-func (ctn *Conn) RollbackTo(ctx context.Context) error {
-	sp := ctx.Value(spkey{}).(*savepoint)
-	return ctn.Exec(ctx, "ROLLBACK TO "+sp.name).Err()
-}
-
-// Rollback restores the DB with the original state that the savepoint had
-// captured and it releases the savepoint not to leave any zombie transactions
-// behind. If the savepoint has already been 'Release'd, this function returns
-// immediately without any errors.
-// Rollback SHOULD be called with a defer statement for EVERY successfully
-// created savepoint, right after its creation.
-func (ctn *Conn) Rollback(ctx context.Context) error {
-	sp := ctx.Value(spkey{}).(*savepoint)
-	if sp.released {
-		return nil
-	}
-
-	err := ctn.Exec(ctx, "ROLLBACK TO "+sp.name).Err()
-	if err == nil {
-		err = ctn.Exec(ctx, "RELEASE "+sp.name).Err()
-	}
-
-	if err == nil {
-		sp.released = true
-	}
-
-	return err
 }

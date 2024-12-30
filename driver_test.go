@@ -125,22 +125,17 @@ func TestPool(t *testing.T) {
 		wg.Add(1)
 		i := i
 		go func() {
-			ctx, err := pool.Savepoint(context.Background())
-			if err != nil {
-				t.Errorf("i=%d err=%s", i, err)
-				wg.Done()
-				return
-			}
-			t.Logf("i=%d connection=%p", i, ctx.Value(ckey{}).(*Conn))
+			ctx, tx, cleanup := pool.BeginTx(context.Background())
+			defer cleanup()
 
-			pool.Exec(ctx, "insert into t(a) values (?) ", strconv.Itoa(i))
+			tx.Exec(ctx, "insert into t(a) values (?) ", strconv.Itoa(i))
 			var res int
-			if err := pool.Exec(ctx, "select count(*) from t").ScanOne(&res); err != nil {
+			if err := tx.Exec(ctx, "select count(*) from t").ScanOne(&res); err != nil {
 				t.Errorf("i=%d err=%s", i, err)
 			}
 			t.Logf("i=%d res=%d", i, res)
 			time.Sleep(time.Duration(rand.Intn(10)) * time.Millisecond / 10) // force a goroutine switch
-			if err := pool.Release(ctx); err != nil {
+			if err := tx.EndTx(ctx); err != nil {
 				t.Errorf("i=%d err=%s", i, err)
 			}
 			wg.Done()
@@ -167,108 +162,15 @@ func TestRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, err = pool.Savepoint(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ctx, tx, clean := pool.BeginTx(ctx)
+	defer clean()
 
-	{
-		// The ctx on the left here is a new ctx and has a different
-		// savepoint stored in it. This is crucial, otherwise we'd lose
-		// the previous savepoint.
-		ctx, err := pool.Savepoint(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		pool.Exec(ctx, "insert into t (a) values (?)", "hello world").GuardErr()
-		pool.Release(ctx)
-		pool.Rollback(ctx) // ignored since release happened before
-		assertEquals(t, ctx, pool, "select a from t", "hello world")
-	}
+	tx.Exec(ctx, "insert into t (a) values (?)", "hello world").GuardErr()
+	assertEquals(t, ctx, tx, "select a from t", "hello world")
 
 	// top-level nesting can invalidate everything, the table should be empty
-	pool.Rollback(ctx)
-	assertEquals(t, ctx, pool, "select count(a) from t", 0)
-}
-
-func TestRollbackTo(t *testing.T) {
-	pool, err := OpenPool(t.TempDir() + "/db")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ctx := context.Background()
-	if err := pool.Exec(ctx, "create table t (a)").Err(); err != nil {
-		t.Fatal(err)
-	}
-
-	txCtx, err := pool.Savepoint(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	pool.Exec(txCtx, "insert into t (a) values (?)", "hello world").GuardErr()
-	assertEquals(t, txCtx, pool, "select a from t", "hello world")
-
-	// RollbackTo, the changes are discarded, and the transaction is NOT
-	// cancelled. Therefore the following VACUUM attempt made from a different
-	// goroutine on a different connection should FAIL.
-	err = pool.RollbackTo(txCtx)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// The table should be empty
-	assertEquals(t, txCtx, pool, "select count(a) from t", 0)
-
-	err = goRunVacuum(pool, BusyTransaction)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// The next VACUUM attempt should succeed, as the function Release
-	// is getting executed here.
-	err = pool.Release(txCtx)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = goRunVacuum(pool, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestRollbackWithoutRelease(t *testing.T) {
-	pool, err := OpenPool(t.TempDir() + "/db")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ctx := context.Background()
-	pool.Exec(ctx, "create table t (a)").GuardErr()
-
-	txCtx, err := pool.Savepoint(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	pool.Exec(txCtx, "insert into t (a) values (?)", "hello world").GuardErr()
-	assertEquals(t, txCtx, pool, "select a from t", "hello world")
-
-	// Rollback, the changes are not committed, and the transaction is
-	// cancelled. Therefore the following VACUUM attempt made from a different
-	// goroutine on a different connection should succeed without any issues.
-	err = pool.Rollback(txCtx)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = goRunVacuum(pool, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertEquals(t, ctx, pool, "select count(a) from t", 0)
+	tx.RollbackTx(ctx)
+	assertEquals(t, ctx, tx, "select count(a) from t", 0)
 }
 
 // TODO: this should probably go into a script (cf rsc.io/script).
@@ -305,67 +207,6 @@ func goRunVacuum(pool *Connections, expect error) error {
 	}()
 
 	return <-errc
-}
-
-func TestRollbackNestedSavepointsWithoutRelease(t *testing.T) {
-	pool, err := OpenPool(t.TempDir() + "/db")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ctx := context.Background()
-	if err := pool.Exec(ctx, "create table t (a)").Err(); err != nil {
-		t.Fatal(err)
-	}
-
-	txCtx1, err := pool.Savepoint(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	pool.Exec(txCtx1, "insert into t (a) values (?)", "hello world").GuardErr()
-	assertEquals(t, txCtx1, pool, "select a from t", "hello world")
-
-	{
-		// The new savepoint is stored in a different context.
-		txCtx2, err := pool.Savepoint(txCtx1)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		pool.Exec(txCtx2, "insert into t (a) values (?)", "hi there").GuardErr()
-		assertEquals(t, txCtx2, pool, "select count(a) from t", 2)
-
-		// The inner Rollback, the changes are not committed, and the transaction
-		// (the implicit one that was created when the first savepoint was
-		// introduced) is not affected. So the VACUUM attempt below should FAIL.
-		err = pool.Rollback(txCtx2)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		// The table should now contain only one entry, because of the rollback
-		assertEquals(t, txCtx2, pool, "select count(a) from t", 1)
-
-		err = goRunVacuum(pool, BusyTransaction)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// Outer Rollback, the changes are not committed, and implicit transaction
-	// is cancelled. So the following VACUUM attempt should succeed.
-	err = pool.Rollback(txCtx1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = goRunVacuum(pool, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	assertEquals(t, txCtx1, pool, "select count(a) from t", 0)
 }
 
 func TestCancel(t *testing.T) {
@@ -503,11 +344,8 @@ func BenchmarkLoopTables(bench *testing.B) {
 	if err != nil {
 		bench.Fatal(err)
 	}
-	ctx := context.Background()
-	ctx, err = db.Savepoint(ctx)
-	if err != nil {
-		bench.Fatal(err)
-	}
+	ctx, tx, done := db.BeginTx(context.Background())
+	defer done()
 	db.mustExec(ctx, bench, "create table tbl1 (a primary key)")
 	db.mustExec(ctx, bench, "create table tbl2 (a, b)")
 	for i := 0; i < 20; i++ {
@@ -517,16 +355,14 @@ func BenchmarkLoopTables(bench *testing.B) {
 			db.mustExec(ctx, bench, "insert into tbl2(a, b) values(?, ?)", a, "b_"+strconv.Itoa(i))
 		}
 	}
-	if err := db.Release(ctx); err != nil {
+	if err := tx.EndTx(ctx); err != nil {
 		bench.Fatal(err)
 	}
 	bench.ResetTimer()
 
 	for i := 0; i < bench.N; i++ {
-		ctx, err := db.Savepoint(ctx)
-		if err != nil {
-			bench.Fatal(err)
-		}
+		ctx, tx, cleanup := db.BeginTx(context.Background())
+
 		st := db.Exec(ctx, "select a from tbl1")
 		var a, b string
 		for st.Next() {
@@ -551,9 +387,10 @@ func BenchmarkLoopTables(bench *testing.B) {
 		if st.Err() != nil {
 			bench.Fatal(st.Err())
 		}
-		if err := db.Release(ctx); err != nil {
+		if err := tx.EndTx(ctx); err != nil {
 			bench.Fatal(err)
 		}
+		cleanup()
 	}
 }
 
