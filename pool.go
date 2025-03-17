@@ -101,7 +101,7 @@ func (p *Connections) Exec(ctx context.Context, cmd string, args ...any) *Rows {
 
 	rows := ctn.Exec(ctx, cmd, args...)
 	if !reused {
-		rows.final = func() { p.put(ctn) }
+		runtime.AddCleanup(rows, func(ctn *Conn) { p.put(ctn) }, ctn)
 	}
 
 	return rows

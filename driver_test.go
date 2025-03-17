@@ -121,7 +121,7 @@ func TestPool(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		wg.Add(1)
 		i := i
 		go func() {
@@ -193,20 +193,6 @@ func assertEquals(t *testing.T, ctx context.Context, x interface {
 	if !cmp.Equal(gotv, want) {
 		t.Fatal(cmp.Diff(gotv, want))
 	}
-}
-
-func goRunVacuum(pool *Connections, expect error) error {
-	errc := make(chan error)
-
-	go func() {
-		err := pool.Exec(context.Background(), "VACUUM;").Err()
-		if !errors.Is(err, expect) {
-			errc <- fmt.Errorf("unexpected error: %w", err)
-		}
-		close(errc)
-	}()
-
-	return <-errc
 }
 
 func TestCancel(t *testing.T) {
@@ -348,10 +334,10 @@ func BenchmarkLoopTables(bench *testing.B) {
 	defer done()
 	db.mustExec(ctx, bench, "create table tbl1 (a primary key)")
 	db.mustExec(ctx, bench, "create table tbl2 (a, b)")
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		a := "a_" + strconv.Itoa(i)
 		db.mustExec(ctx, bench, "insert into tbl1(a) values (?)", a)
-		for i := 0; i < 2000; i++ {
+		for i := range 2000 {
 			db.mustExec(ctx, bench, "insert into tbl2(a, b) values(?, ?)", a, "b_"+strconv.Itoa(i))
 		}
 	}

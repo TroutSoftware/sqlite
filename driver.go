@@ -26,6 +26,7 @@ import (
 	"io"
 	"math/bits"
 	"reflect"
+	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
 	"strconv"
@@ -168,7 +169,7 @@ type Conn struct {
 
 	zombie *time.Timer
 	task   *trace.Task // for multi-query operations
-	next   *Conn           // for free list
+	next   *Conn       // for free list
 }
 
 func (c *Conn) error(rv C.int) error {
@@ -230,7 +231,9 @@ func (c *Conn) Exec(ctx context.Context, cmd string, args ...any) *Rows {
 		return &Rows{err: err, stmt: st}
 	}
 
-	return &Rows{ctx: ctx, stmt: st, err: st.step(ctx), scflag: true}
+	rows := &Rows{ctx: ctx, stmt: st, err: st.step(ctx), scflag: true}
+	runtime.AddCleanup(rows, func(st *stmt) { st.finalize() }, rows.stmt)
+	return rows
 }
 
 func (c *Conn) Close() error {
@@ -252,7 +255,6 @@ type Rows struct {
 
 	scflag bool
 	stmt   *stmt
-	final  func()
 }
 
 // NewErroredRows create a collection of rows that will error on the first call.
@@ -338,7 +340,7 @@ func (rows *Rows) Scan(dst ...any) {
 		case ColStrings:
 			cnt := C.sqlite3_column_count(rows.stmt.s)
 			dst = make([]any, cnt)
-			for i := 0; i < int(cnt); i++ {
+			for i := range int(cnt) {
 				cn := C.GoString(C.sqlite3_column_name(rows.stmt.s, C.int(i)))
 				v := new(string)
 				orig[cn] = v
@@ -360,11 +362,6 @@ type MultiString []string
 func (r *Rows) Err() error {
 	r.stmt.finalize()
 	statementsProfiles.Remove(r.stmt)
-
-	if r.final != nil {
-		r.final()
-		r.final = nil // prevent double free
-	}
 
 	if errors.Is(r.err, io.EOF) {
 		return nil

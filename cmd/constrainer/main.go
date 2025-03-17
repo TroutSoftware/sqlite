@@ -112,7 +112,7 @@ func main() {
 
 				fmt.Fprintf(&buf, "package %s\n", pkg.Name)
 
-				for i := 0; i < stdef.NumFields(); i++ {
+				for i := range stdef.NumFields() {
 
 					tags := strings.Split(reflect.StructTag(stdef.Tag(i)).Get("vtab"), ",")
 					acc := accessor{
