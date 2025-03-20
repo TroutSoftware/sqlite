@@ -18,13 +18,11 @@ import "C"
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math/bits"
 	"reflect"
 	"runtime"
 	"runtime/pprof"
@@ -255,6 +253,7 @@ type Rows struct {
 
 	scflag bool
 	stmt   *stmt
+	final  func()
 }
 
 // NewErroredRows create a collection of rows that will error on the first call.
@@ -362,6 +361,10 @@ type MultiString []string
 func (r *Rows) Err() error {
 	r.stmt.finalize()
 	statementsProfiles.Remove(r.stmt)
+
+	if r.final != nil {
+		r.final()
+	}
 
 	if errors.Is(r.err, io.EOF) {
 		return nil
@@ -518,7 +521,7 @@ func (s *stmt) step(ctx context.Context) error {
 	s.c.mxdb.Lock()
 	rv := C.sqlite3_step(s.s)
 	const max_retry = 5
-	for i := 0; i < max_retry; i++ {
+	for range max_retry {
 		switch rv {
 		case C.SQLITE_ROW:
 			s.c.mxdb.Unlock()
@@ -616,23 +619,4 @@ func (stmt *stmt) scan(dst []any) error {
 		}
 	}
 	return nil
-}
-
-func randname() string {
-	nm := make([]byte, 4)
-	rand.Read(nm)
-	val := uint32(nm[0])<<24 | uint32(nm[1])<<16 | uint32(nm[2])<<8 | uint32(nm[3])
-
-	var buf [10]byte // big enough for 32bit value base 10
-	i := len(buf) - 1
-	for val >= 10 {
-		q, r := bits.Div32(0, val, 10)
-		buf[i] = byte('a' + r)
-		i--
-		val = q
-	}
-	// val < 10
-	buf[i] = byte('a' + val)
-	return string(buf[i:])
-
 }

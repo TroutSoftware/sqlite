@@ -213,7 +213,7 @@ func buildReqVM(st reflect.Type) rVM {
 	}
 
 	rvm.ptypes = make(map[string]*C.char, st.NumField())
-	for i := 0; i < st.NumField(); i++ {
+	for i := range st.NumField() {
 		f := st.Field(i)
 		vtab := f.Tag.Get("vtab")
 		vparts := strings.Split(vtab, ",")
@@ -261,7 +261,7 @@ func goGetTableDefinition(vtab C.uintptr_t, def **C.char) int {
 	vm := cgo.Handle(vtab).Value().(rVM)
 	var buf strings.Builder
 	buf.WriteString("create table xx(") // SQLite ignores the name
-	for i := 0; i < len(vm.nidx)-1; i++ {
+	for i := range len(vm.nidx) - 1 {
 		if i > 0 {
 			buf.WriteString(", ")
 		}
@@ -286,7 +286,7 @@ func goSetBestIndex(ht C.uintptr_t, idx *C.sqlite3_index_info) int {
 
 	var cs Constraints
 	var colused bitset
-	for i := 0; i < int(idx.nConstraint); i++ {
+	for i := range int(idx.nConstraint) {
 		colused.Add(int(ci[i].iColumn))
 
 		if ci[i].usable == 0 {
