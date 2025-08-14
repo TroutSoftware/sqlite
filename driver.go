@@ -487,7 +487,6 @@ func (s *stmt) start(args []any) error {
 
 var sqlite3StatementPointerType = C.go_strcpy("stmt-pointer")
 
-func (s *stmt) interrupt() { C.sqlite3_interrupt(s.c.db) }
 func (s *stmt) finalize() {
 	if s.s != nil {
 		C.sqlite3_finalize(s.s)

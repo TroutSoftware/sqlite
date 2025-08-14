@@ -67,7 +67,7 @@ var (
 func reflectCallMachine(t any) callmachine {
 	tt := reflect.TypeOf(t)
 	cm := callmachine{f: reflect.ValueOf(t)}
-	for i := 0; i < tt.NumIn(); i++ {
+	for i := range tt.NumIn() {
 		ta := tt.In(i)
 
 		var varmark rop
@@ -105,7 +105,7 @@ func reflectCallMachine(t any) callmachine {
 	default:
 		panic("invalid number of output arguments")
 	}
-	for i := 0; i < tt.NumOut(); i++ {
+	for i := range tt.NumOut() {
 		switch tt.Out(i) {
 		case intType:
 			cm.ops = append(cm.ops, ropReturnInt)
