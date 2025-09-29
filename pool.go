@@ -101,8 +101,7 @@ func (p *Connections) Exec(ctx context.Context, cmd string, args ...any) *Rows {
 
 	rows := ctn.Exec(ctx, cmd, args...)
 	if !reused {
-		clean := runtime.AddCleanup(ctn, func(p *Connections) { p.put(ctn) }, p)
-		rows.final = func() { clean.Stop(); p.put(ctn) }
+		rows.final = func() { p.put(ctn); ctn.pointers.Unpin() }
 	}
 
 	return rows

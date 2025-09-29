@@ -4,7 +4,7 @@
 // but do note that [OpenPool] is used throughout the server code.
 //
 // The package API is designed to expose as possible of the underlying engine as possible,
-// including the option to expose functions and data structures via [Register].
+// including the option to expose Gofunctions via [RegisterFunc].
 package sqlite
 
 // #include <amalgamation/sqlite3.h>
@@ -16,6 +16,7 @@ package sqlite
 import "C"
 
 import (
+
 	"bytes"
 	"context"
 	"encoding"
@@ -27,6 +28,7 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
+	"runtime/cgo"
 	"strconv"
 	"sync"
 	"time"
@@ -40,7 +42,7 @@ type SQLITE3 *C.sqlite3
 // Register adds a new statically compiled extension to register when a new SQLite connection is opened.
 // It should be called in a sub-package init function.
 //
-// Most of the time, f is going to be returned from [RegisterTable] or [RegisterFunc].
+// Most of the time, f is going to be returned from [RegisterFunc].
 //
 // If not, due to the way CGO handles names [bug-13467], callers need to wrap this in an unsafe pointer:
 //
@@ -168,6 +170,8 @@ type Conn struct {
 	zombie *time.Timer
 	task   *trace.Task // for multi-query operations
 	next   *Conn       // for free list
+
+	pointers runtime.Pinner
 }
 
 func (c *Conn) error(rv C.int) error {
@@ -229,7 +233,7 @@ func (c *Conn) Exec(ctx context.Context, cmd string, args ...any) *Rows {
 		return &Rows{err: err, stmt: st}
 	}
 
-	rows := &Rows{ctx: ctx, stmt: st, err: st.step(ctx), scflag: true}
+	rows := &Rows{ctx: ctx, stmt: st, err: st.step(ctx), scflag: true, final: func() { c.pointers.Unpin() }}
 	runtime.AddCleanup(rows, func(st *stmt) { st.finalize() }, rows.stmt)
 	return rows
 }
@@ -454,7 +458,8 @@ func (s *stmt) start(args []any) error {
 			rv = C.sqlite3_bind_pointer(s.s, C.int(i+1), unsafe.Pointer(v), sqlite3StatementPointerType, C.SQLITE_STATIC)
 
 		case PointerValue:
-			rv = C.sqlite_BindGoPointer(s.s, C.int(i+1), C.uintptr_t(allocHandle(v.v)), namefor(reflect.TypeOf(v.v).Elem()))
+			vv := cgo.Handle(v).Value()
+			rv = C.sqlite_BindGoPointer(s.s, C.int(i+1), C.uintptr_t(v), namefor(reflect.TypeOf(vv).Elem()))
 
 		case []byte:
 			rv = C.sqlite3_bind_blob(s.s, C.int(i+1), unsafe.Pointer(unsafe.SliceData(v)), C.int(len(v)), C.SQLITE_TRANSIENT)

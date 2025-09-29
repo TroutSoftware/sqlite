@@ -4,18 +4,18 @@ package sqlite
 #include <amalgamation/sqlite3.h>
 #include <stdint.h>
 
-extern void sqlite_FreeHandle(uintptr_t);
+#include <stdio.h>
 
-static inline void wrap_freeHandle(void *p) {
-	sqlite_FreeHandle((uintptr_t)p);
-}
+extern void cleanupGoHandle(uintptr_t);
+
+void wrapGoCleanup(void *handle) { cleanupGoHandle((uintptr_t) handle); }
 
 void sqlite_ResultGoPointer(sqlite3_context* ctx, uintptr_t ptr, const char* name) {
-	sqlite3_result_pointer(ctx, (void*)ptr, name, wrap_freeHandle);
+	sqlite3_result_pointer(ctx, (void*)ptr, name, wrapGoCleanup);
 }
 
 int sqlite_BindGoPointer(sqlite3_stmt* stmt, int pos, uintptr_t ptr, const char* name) {
-	return sqlite3_bind_pointer(stmt, pos, (void*)ptr, name, wrap_freeHandle);
+	return sqlite3_bind_pointer(stmt, pos, (void*)ptr, name, wrapGoCleanup);
 }
 */
 import "C"

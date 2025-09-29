@@ -202,7 +202,7 @@ func callGoNativeFunc(ctx *C.sqlite3_context, argc C.int, argv **C.sqlite3_value
 			args[i] = reflect.ValueOf(int(C.sqlite3_value_int(goargv[i])))
 		case ropBindPtr:
 			if v := uintptr(C.sqlite3_value_pointer(goargv[i], cm.pn[k])); v != 0 {
-				args[i] = reflect.ValueOf(accessHandle(v))
+				args[i] = reflect.ValueOf(cgo.Handle(v).Value())
 			} else {
 				args[i] = reflect.Zero(cm.tt[k])
 			}
@@ -270,7 +270,7 @@ func callGoNativeFunc(ctx *C.sqlite3_context, argc C.int, argv **C.sqlite3_value
 		}
 	case ropReturnPtr:
 		ptr := tm[0].Interface().(PointerValue)
-		C.sqlite_ResultGoPointer(ctx, C.uintptr_t(allocHandle(ptr.v)), namefor(reflect.TypeOf(ptr.v).Elem()))
+		C.sqlite_ResultGoPointer(ctx, C.uintptr_t(ptr), namefor(reflect.TypeOf(cgo.Handle(ptr).Value()).Elem()))
 	case ropReturnNullString:
 		v := tm[0].Interface().(NullString)
 		if len(v) > 0 {

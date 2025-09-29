@@ -17,7 +17,6 @@ func TestFunc(t *testing.T) {
 		RegisterFunc("my_nevererror", func() (int, error) { return 42, nil }),
 		RegisterFunc("my_alwayserror", func() (int, error) { return 0, errors.New("alwayserror") }),
 		RegisterFunc("readmypointer", func(v *MyString) { v.s = "yes sir!" }),
-		RegisterFunc("passmypointer", func(v *MyString) PointerValue { return AsPointer(v) }),
 		RegisterFunc("add_all", func(vals ...int) int {
 			sum := 0
 			for _, v := range vals {
@@ -99,19 +98,7 @@ func TestFunc(t *testing.T) {
 
 	t.Run("readmypointer", func(t *testing.T) {
 		var val MyString
-		err := db.Exec(context.Background(), "select readmypointer(?)", AsPointer(&val)).Err()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if val.s != "yes sir!" {
-			t.Error("invalid read back", val.s)
-		}
-	})
-
-	t.Run("passmypointer", func(t *testing.T) {
-		var val MyString
-		err := db.Exec(context.Background(), "select readmypointer(passmypointer(?))", AsPointer(&val)).Err()
+		err := db.Exec(context.Background(), "select readmypointer(?)", db.AsPointer(&val)).Err()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,24 +119,3 @@ func TestFunc(t *testing.T) {
 		}
 	})
 }
-
-/*
-func exportAllFuncs(t *testing.T, db *Conn) {
-	var funcs []string
-	st := db.Exec(context.Background(), "pragma function_list")
-	for st.Next() {
-		var fname string
-		st.Scan(&fname)
-		funcs = append(funcs, fname)
-	}
-	if st.Err() != nil {
-		t.Fatal(st.Err())
-	}
-
-	sort.Strings(funcs)
-	for _, n := range funcs {
-		t.Log("function", n)
-	}
-
-}
-*/

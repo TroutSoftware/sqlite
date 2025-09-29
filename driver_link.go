@@ -6,6 +6,6 @@
 
 package sqlite
 
-// #cgo LDFLAGS: -L${SRCDIR}/amalgamation -lsqlite3
+// #cgo LDFLAGS: -L${SRCDIR}/amalgamation -lsqlite3 -Wl,-rpath=${SRCDIR}/amalgamation
 // #cgo LDFLAGS: -ldl -lm
 import "C"
