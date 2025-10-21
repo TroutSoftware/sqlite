@@ -368,6 +368,7 @@ func (r *Rows) Err() error {
 
 	if r.final != nil {
 		r.final()
+		r.final = nil // prevent double free
 	}
 
 	if errors.Is(r.err, io.EOF) {
