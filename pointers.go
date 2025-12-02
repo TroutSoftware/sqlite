@@ -48,6 +48,6 @@ func (ctn *Conn) AsPointer(v any) PointerValue {
 }
 
 //export cleanupGoHandle
-func cleanupGoHandle(hdl C.uintptr_t) { 
-	cgo.Handle(hdl).Delete() 
+func cleanupGoHandle(hdl C.uintptr_t) {
+	cgo.Handle(hdl).Delete()
 }

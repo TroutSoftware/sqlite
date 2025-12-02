@@ -16,7 +16,6 @@ package sqlite
 import "C"
 
 import (
-
 	"bytes"
 	"context"
 	"encoding"
@@ -26,9 +25,9 @@ import (
 	"io"
 	"reflect"
 	"runtime"
+	"runtime/cgo"
 	"runtime/pprof"
 	"runtime/trace"
-	"runtime/cgo"
 	"strconv"
 	"sync"
 	"time"
@@ -302,7 +301,12 @@ func (rows *Rows) Next() bool {
 
 	// note: step must run in the main goroutine, since the library ensures that calls are locked to an OS thread
 	rows.err = rows.stmt.step(rows.ctx)
-	return rows.err == nil
+	if rows.err == nil {
+		return true
+	}
+	// execute only for side-effect (freeing connection)
+	rows.Err()
+	return false
 }
 
 // Scan unmarshals the underlying SQLite value into a Go value.
@@ -499,8 +503,6 @@ func (s *stmt) finalize() {
 		s.s = nil
 	}
 }
-
-const maxslice = 1<<31 - 1
 
 var timefmt = []string{
 	"2006-01-02 15:04:05.999999999",
