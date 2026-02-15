@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
@@ -67,19 +68,50 @@ func TestShortHands(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.Background()
-
-	ctn.Exec(ctx, "create table tbl1 (a primary key, b)").GuardErr()
-	ctn.Exec(ctx, "insert into tbl1 (a, b) values (?, ?)", 1, "a value").GuardErr()
+	ctn.Exec(t.Context(), "create table tbl1 (a primary key, b)").GuardErr()
+	ctn.Exec(t.Context(), "insert into tbl1 (a, b) values (?, ?)", 1, "a value").GuardErr()
 
 	var a int
-	if err := ctn.Exec(ctx, "select a from tbl1 where b = ?", "a value").ScanOne(&a); err != nil {
+	if err := ctn.Exec(t.Context(), "select a from tbl1 where b = ?", "a value").ScanOne(&a); err != nil {
 		t.Fatal("reading a back", err)
 	}
 
 	if a != 1 {
 		t.Errorf("invalid value back: want 1, got %d", a)
 	}
+}
+
+func TestSerialize(t *testing.T) {
+	t.Run("int64", func(t *testing.T) {
+		db, err := Open(t.TempDir() + "/db")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		db.Exec(t.Context(), "create table A(a)").GuardErr()
+		db.Exec(t.Context(), "create table B(b text)").GuardErr()
+		db.Exec(t.Context(), "insert into A(a) values (?)", int64(42)).GuardErr()
+		db.Exec(t.Context(), "insert into B(b) values (?)", int64(42)).GuardErr()
+
+		t.Run("from integer", func(t *testing.T) {
+			var out int64
+			if err := db.Exec(t.Context(), "select a from A").ScanOne(&out); err != nil {
+				t.Fatal(err)
+			}
+			if out != 42 {
+				t.Error(cmp.Diff(out, 42))
+			}
+		})
+		t.Run("from text", func(t *testing.T) {
+			var out int64
+			if err := db.Exec(t.Context(), "select b from B").ScanOne(&out); err != nil {
+				t.Fatal(err)
+			}
+			if out != 42 {
+				t.Error(cmp.Diff(out, 42))
+			}
+		})
+	})
 }
 
 func TestReleaseOnError(t *testing.T) {
@@ -93,13 +125,12 @@ func TestReleaseOnError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.Background()
-	if err := ctn.Exec(ctx, "create table tbl1 (a primary key, b)").Err(); err != nil {
+	if err := ctn.Exec(t.Context(), "create table tbl1 (a primary key, b)").Err(); err != nil {
 		t.Fatal("cannot create table", err)
 	}
 
 	var a string
-	err = ctn.Exec(ctx, "select a from tbl1").ScanOne(&a)
+	err = ctn.Exec(t.Context(), "select a from tbl1").ScanOne(&a)
 	if !errors.Is(err, io.EOF) {
 		t.Fatal("error selecting missing entry", err)
 	}
@@ -114,8 +145,7 @@ func TestPool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
-	if err := pool.Exec(ctx, "create table t (a)").Err(); err != nil {
+	if err := pool.Exec(t.Context(), "create table t (a)").Err(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -125,7 +155,7 @@ func TestPool(t *testing.T) {
 		wg.Add(1)
 		i := i
 		go func() {
-			ctx, tx, cleanup := pool.BeginTx(context.Background())
+			ctx, tx, cleanup := pool.BeginTx(t.Context())
 			defer cleanup()
 
 			tx.Exec(ctx, "insert into t(a) values (?) ", strconv.Itoa(i))
@@ -144,7 +174,7 @@ func TestPool(t *testing.T) {
 
 	wg.Wait()
 	var res int
-	if err := pool.Exec(ctx, "select count(*) from t").ScanOne(&res); err != nil {
+	if err := pool.Exec(t.Context(), "select count(*) from t").ScanOne(&res); err != nil {
 		t.Fatal(err)
 	}
 	if res != 5 {
@@ -157,12 +187,11 @@ func TestRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
-	if err := pool.Exec(ctx, "create table t (a)").Err(); err != nil {
+	if err := pool.Exec(t.Context(), "create table t (a)").Err(); err != nil {
 		t.Fatal(err)
 	}
 
-	ctx, tx, clean := pool.BeginTx(ctx)
+	ctx, tx, clean := pool.BeginTx(t.Context())
 	defer clean()
 
 	tx.Exec(ctx, "insert into t (a) values (?)", "hello world").GuardErr()
@@ -196,20 +225,42 @@ func assertEquals(t *testing.T, ctx context.Context, x interface {
 }
 
 func TestCancel(t *testing.T) {
-	t.Skip("too coarse for now")
-	db, err := OpenPool(t.TempDir()+"/db",
-		RegisterFunc("sleep", func(delay int) int { time.Sleep(time.Duration(delay) * time.Millisecond); return delay }))
+	synctest.Test(t, func(t *testing.T) {
+		db, err := OpenPool(t.TempDir()+"/db",
+			RegisterFunc("sleep", func(delay int) int { time.Sleep(time.Duration(delay) * time.Millisecond); return delay }))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+		defer cancel()
+
+		var delay int
+		err = db.Exec(ctx, "select sleep(200)").ScanOne(&delay)
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("got invalid result: delay=%d error=%s", delay, err)
+		}
+	})
+}
+
+func TestReadOnly(t *testing.T) {
+	name := t.TempDir() + "/db"
+	db, err := Open(name)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
+	if err := db.Exec(t.Context(), "create table T(a text)").Err(); err != nil {
+		t.Fatal(err)
+	}
 
-	var delay int
-	err = db.Exec(ctx, "select sleep(200)").ScanOne(delay)
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("got invalid result: delay=%d error=%s", delay, err)
+	db, err = ReadOnly(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Exec(t.Context(), "insert into T (a) values (3)").Err(); !errors.Is(err, ErrReadOnlyDatabase) {
+		t.Errorf("in read-only database: want permission error, got %s", err)
 	}
 }
 
@@ -219,12 +270,10 @@ func TestGenericAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.Background()
-
-	if err := ctn.Exec(ctx, "create table tbl1 (a primary key, b)").Err(); err != nil {
+	if err := ctn.Exec(t.Context(), "create table tbl1 (a primary key, b)").Err(); err != nil {
 		t.Fatal("cannot create table", err)
 	}
-	if err := ctn.Exec(ctx, "insert into tbl1 (a, b) values (1, 2), (3, 4)").Err(); err != nil {
+	if err := ctn.Exec(t.Context(), "insert into tbl1 (a, b) values (1, 2), (3, 4)").Err(); err != nil {
 		t.Fatal("cannot create table", err)
 	}
 
@@ -235,7 +284,7 @@ func TestGenericAccess(t *testing.T) {
 	}
 
 	var got []ColStrings
-	st := ctn.Exec(ctx, "select a, b from tbl1")
+	st := ctn.Exec(t.Context(), "select a, b from tbl1")
 	for st.Next() {
 		cs := make(ColStrings)
 		st.Scan(cs)
@@ -305,18 +354,16 @@ func cmpValues[T, U any](t *testing.T, in T, out U) {
 		t.Fatal(err)
 	}
 
-	ctx := context.Background()
-
-	if err := ctn.Exec(ctx, "create table tbl1 (a)").Err(); err != nil {
+	if err := ctn.Exec(t.Context(), "create table tbl1 (a)").Err(); err != nil {
 		t.Fatal("creating table", err)
 	}
 
-	if err := ctn.Exec(ctx, "insert into tbl1 (a) values (?)", in).Err(); err != nil {
+	if err := ctn.Exec(t.Context(), "insert into tbl1 (a) values (?)", in).Err(); err != nil {
 		t.Fatal("inserting value", err)
 	}
 
 	var got U
-	if err := ctn.Exec(ctx, "select a from tbl1").ScanOne(&got); err != nil {
+	if err := ctn.Exec(t.Context(), "select a from tbl1").ScanOne(&got); err != nil {
 		t.Fatal("reading value", err)
 	}
 
@@ -330,7 +377,7 @@ func BenchmarkLoopTables(bench *testing.B) {
 	if err != nil {
 		bench.Fatal(err)
 	}
-	ctx, tx, done := db.BeginTx(context.Background())
+	ctx, tx, done := db.BeginTx(bench.Context())
 	defer done()
 	db.mustExec(ctx, bench, "create table tbl1 (a primary key)")
 	db.mustExec(ctx, bench, "create table tbl2 (a, b)")
@@ -344,10 +391,9 @@ func BenchmarkLoopTables(bench *testing.B) {
 	if err := tx.EndTx(ctx); err != nil {
 		bench.Fatal(err)
 	}
-	bench.ResetTimer()
 
-	for i := 0; i < bench.N; i++ {
-		ctx, tx, cleanup := db.BeginTx(context.Background())
+	for bench.Loop() {
+		ctx, tx, cleanup := db.BeginTx(bench.Context())
 
 		st := db.Exec(ctx, "select a from tbl1")
 		var a, b string
@@ -391,17 +437,17 @@ func TestMultiValueScansAreIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := conn.Exec(context.Background(), "create table if not exists test (a text, b text)").Err(); err != nil {
+	if err := conn.Exec(t.Context(), "create table if not exists test (a text, b text)").Err(); err != nil {
 		t.Fatal(err)
 	}
-	if err := conn.Exec(context.Background(), "insert into test (a, b) VALUES(?,?)", plainstring("dog:a"), plainstring("cat:b")).Err(); err != nil {
+	if err := conn.Exec(t.Context(), "insert into test (a, b) VALUES(?,?)", plainstring("dog:a"), plainstring("cat:b")).Err(); err != nil {
 		t.Fatal(err)
 	}
-	if err := conn.Exec(context.Background(), "insert into test (a, b) VALUES(?,?)", plainstring("fff:a"), plainstring("mmm:b")).Err(); err != nil {
+	if err := conn.Exec(t.Context(), "insert into test (a, b) VALUES(?,?)", plainstring("fff:a"), plainstring("mmm:b")).Err(); err != nil {
 		t.Fatal(err)
 	}
 	var as, bs []plainstring
-	rows := conn.Exec(context.Background(), "select a, b from test order by a")
+	rows := conn.Exec(t.Context(), "select a, b from test order by a")
 	for rows.Next() {
 		var a, b plainstring
 		rows.Scan(&a, &b)

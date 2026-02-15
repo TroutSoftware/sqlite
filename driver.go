@@ -61,15 +61,20 @@ func LoadExtensions(db SQLITE3) {
 	}
 }
 
+var (
+	ErrPermissionDenied = errors.New("access permission denied")
+	ErrReadOnlyDatabase = errors.New("attempt to write a readonly database")
+)
+
 var errText = map[C.int]error{
 	C.SQLITE_ERROR:         errors.New("SQL error or missing database"),
 	C.SQLITE_INTERNAL:      errors.New("internal logic error in SQLite"),
-	C.SQLITE_PERM:          errors.New("access permission denied"),
+	C.SQLITE_PERM:          ErrPermissionDenied,
 	C.SQLITE_ABORT:         errors.New("callback routine requested an abort"),
 	C.SQLITE_BUSY:          errors.New("the database file is busy"),
 	C.SQLITE_LOCKED:        errors.New("a table in the database is locked"),
 	C.SQLITE_NOMEM:         errors.New("a malloc() failed"),
-	C.SQLITE_READONLY:      errors.New("attempt to write a readonly database"),
+	C.SQLITE_READONLY:      ErrReadOnlyDatabase,
 	C.SQLITE_INTERRUPT:     context.DeadlineExceeded,
 	C.SQLITE_IOERR:         errors.New("some kind of disk I/O error occurred"),
 	11:                     errors.New("the database disk image is malformed"),
@@ -520,7 +525,7 @@ func (s *stmt) step(ctx context.Context) error {
 		select {
 		case <-done:
 		case <-ctx.Done():
-			// s.interrupt()
+			C.sqlite3_interrupt(s.c.db)
 		}
 	}()
 	defer close(done)
@@ -562,6 +567,8 @@ func (stmt *stmt) scan(dst []any) error {
 				*v = val > 0
 			case *int:
 				*v = int(val)
+			case *int64:
+				*v = val
 			case *string:
 				*v = strconv.FormatInt(val, 10)
 			}
@@ -583,6 +590,12 @@ func (stmt *stmt) scan(dst []any) error {
 					return err
 				}
 				*v = int(vv)
+			case *int64:
+				vv, err := strconv.ParseInt(string(b), 10, 64)
+				if err != nil {
+					return err
+				}
+				*v = vv
 			case *[]byte:
 				if cap(*v) < len(b) {
 					*v = make([]byte, len(b))

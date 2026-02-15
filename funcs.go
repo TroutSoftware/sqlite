@@ -160,6 +160,8 @@ func RegisterFunc(name string, t any) func(SQLITE3) {
 		}
 
 		cn := C.go_strcpy(name)
+		defer C.go_free(unsafe.Pointer(cn))
+
 		rc := C.sqlite3_create_function(
 			(*C.sqlite3)(db),
 			cn,
@@ -173,7 +175,7 @@ func RegisterFunc(name string, t any) func(SQLITE3) {
 		if rc != C.SQLITE_OK {
 			panic(fmt.Sprintf("invalid result: %d", rc))
 		}
-		C.go_free(unsafe.Pointer(cn))
+
 	}
 }
 
