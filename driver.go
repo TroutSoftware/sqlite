@@ -29,6 +29,7 @@ import (
 	"runtime/pprof"
 	"runtime/trace"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -186,7 +187,7 @@ func (c *Conn) error(rv C.int) error {
 	case C.SQLITE_OK:
 		return nil
 	case C.SQLITE_MISUSE:
-		panic(fmt.Errorf("%s: %w", errText[rv], errorString{s: C.GoString(C.sqlite3_errmsg(c.db))}))
+		return fmt.Errorf("%s: %w", errText[rv], errorString{s: C.GoString(C.sqlite3_errmsg(c.db))})
 	case C.SQLITE_BUSY, C.SQLITE_BUSY_SNAPSHOT:
 		return BusyTransaction // the entire transaction must be retried
 	}
@@ -368,6 +369,17 @@ func (rows *Rows) Scan(dst ...any) {
 // MultiString is used to read all values of a statement as string.
 // This is useful if you don’t know ahead of time the values returned.
 type MultiString []string
+
+func (m MultiString) String() string {
+	switch len(m) {
+	case 0:
+		return ""
+	case 1:
+		return m[0]
+	default:
+		return strings.Join(m, ",")
+	}
+}
 
 // Err finalizes the statement, and return an error if any.
 // [Rows] should not be used after this.
