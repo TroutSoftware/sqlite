@@ -122,7 +122,7 @@ var Changes = &analysis.Analyzer{
 	Name:       "changed",
 	Doc:        "Use VCS to know which lines have changed",
 	Run:        run_commitdiffs,
-	ResultType: reflect.TypeOf([]Hunk{}),
+	ResultType: reflect.TypeFor[[]Hunk](),
 }
 
 func run_commitdiffs(pass *analysis.Pass) (any, error) {
